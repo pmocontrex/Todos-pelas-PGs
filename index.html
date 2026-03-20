@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Controle de Projetos</title>
+  <style>
+    /* (mesmo CSS anterior, omitido para brevidade) */
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+    .login-container { max-width: 400px; margin: 100px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    input, select, button { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ccc; border-radius: 4px; }
+    button { background: #2c3e50; color: white; border: none; cursor: pointer; }
+    .erro { color: red; }
+    .app-container { max-width: 1200px; margin: auto; background: white; border-radius: 8px; padding: 20px; }
+    .topo { display: flex; justify-content: space-between; border-bottom: 1px solid #ddd; padding-bottom: 10px; }
+    .nav { display: flex; gap: 10px; margin: 15px 0; }
+    .nav button { width: auto; background: #3498db; }
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px,1fr)); gap: 15px; }
+    .card { background: #f9f9f9; border: 1px solid #ddd; border-radius: 6px; padding: 15px; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #2c3e50; color: white; }
+    .btn-pequeno { padding: 5px 10px; width: auto; margin: 2px; }
+    .admin-only { display: inline-block; }
+    .form-container { max-width: 600px; margin-top: 20px; background: #f9f9f9; padding: 20px; border-radius: 6px; }
+    .checkbox-group { display: flex; flex-wrap: wrap; gap: 10px; }
+    .checkbox-item { display: flex; align-items: center; width: 200px; }
+    .checkbox-item input { width: auto; margin-right: 5px; }
+    .filtros { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px; }
+    .filtros label { font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div id="loginContainer" class="login-container">
+    <h2>Login</h2>
+    <input type="text" id="login" placeholder="Usuário">
+    <input type="password" id="senha" placeholder="Senha">
+    <button onclick="fazerLogin()">Entrar</button>
+    <div id="erroLogin" class="erro"></div>
+  </div>
+
+  <div id="appContainer" class="app-container" style="display: none;">
+    <div class="topo">
+      <span id="usuarioNome"></span>
+      <button onclick="logout()">Sair</button>
+    </div>
+    <div class="nav" id="navBar">
+      <button onclick="mudarTela('painel')">Visão Geral</button>
+      <button onclick="mudarTela('projetos')" class="admin-only">Projetos</button>
+      <button onclick="mudarTela('tarefas')" class="admin-only">Tarefas</button>
+      <button onclick="mudarTela('usuarios')" class="admin-only">Usuários</button>
+      <button onclick="mudarTela('acessos')" class="admin-only">Acessos</button>
+    </div>
+    <div id="conteudo"></div>
+  </div>
+
+  <script>
+    // ========== CONFIGURAÇÃO ==========
+    const API_BASE_URL = '/api/proxy'; // SUBSTITUA PELA SUA URL
+
+    let token = null;
+    let usuario = null;
+    let telaAtual = 'painel';
+
+    // ========== FUNÇÕES AUXILIARES ==========
+    async function apiRequest(path, method = 'GET', data = null, includeToken = true) {
+      const url = new URL(API_BASE_URL, window.location.origin);
+      url.searchParams.append('path', path);
+      
+      const payload = { ...data };
+      if (includeToken && token) payload.token = token;
+      if (method !== 'GET') payload._method = method; // envia o método real no corpo
+      
+      const options = {
+        method: 'POST', // sempre POST, usamos _method para diferenciar
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      };
+      
+      const response = await fetch(url.toString(), options);
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error);
+      return result.data;
+    }
+
+    // ========== LOGIN ==========
+    async function fazerLogin() {
+      const login = document.getElementById('login').value;
+      const senha = document.getElementById('senha').value;
+      try {
+        const data = await apiRequest('login', 'POST', { login, senha }, false);
+        token = data.token;
+        usuario = data.usuario;
+        
+        document.getElementById('loginContainer').style.display = 'none';
+        document.getElementById('appContainer').style.display = 'block';
+        document.getElementById('usuarioNome').innerText = `Olá, ${usuario.nome} (${usuario.nivel})`;
+        
+        if (usuario.nivel !== 'Administrador') {
+          document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
+        } else {
+          document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'inline-block');
+        }
+        
+        mudarTela('painel');
+      } catch (error) {
+        document.getElementById('erroLogin').innerText = error.message;
+      }
+    }
+
+    function logout() {
+      token = null;
+      usuario = null;
+      document.getElementById('loginContainer').style.display = 'block';
+      document.getElementById('appContainer').style.display = 'none';
+      document.getElementById('login').value = '';
+      document.getElementById('senha').value = '';
+    }
+
+    // ========== MUDAR TELA ==========
+    function mudarTela(tela) {
+      telaAtual = tela;
+      if (tela === 'painel') carregarPainel();
+      else if (tela === 'projetos') carregarListaProjetos();
+      else if (tela === 'tarefas') carregarListaTarefas();
+      else if (tela === 'usuarios') carregarListaUsuarios();
+      else if (tela === 'acessos') carregarListaAcessos();
+    }
+
+    // ---------- PAINEL ----------
+    async function carregarPainel() {
+      try {
+        const projetos = await apiRequest('projetos', 'GET');
+        let html = '<h2>Visão Geral de Projetos</h2>';
+        html += '<div class="filtros">';
+        html += '<label>Projeto: <input type="text" id="filtroProjeto" placeholder="Filtrar..."></label>';
+        html += '<label>Tipo: <select id="filtroTipo"><option value="">Todos</option><option>PG</option><option>Rotina</option><option>Projeto</option></select></label>';
+        html += '<label>Cliente: <input type="text" id="filtroCliente"></label>';
+        html += '<label>Unidade: <input type="text" id="filtroUnidade"></label>';
+        html += '<button onclick="aplicarFiltrosPainel()">Aplicar</button>';
+        html += '</div>';
+        html += '<div id="listaProjetos" class="card-grid"></div>';
+        document.getElementById('conteudo').innerHTML = html;
+        window.projetosPainel = projetos;
+        aplicarFiltrosPainel();
+      } catch (error) {
+        alert('Erro ao carregar projetos: ' + error.message);
+      }
+    }
+
+    function aplicarFiltrosPainel() {
+      const filtroProjeto = document.getElementById('filtroProjeto')?.value.toLowerCase() || '';
+      const filtroTipo = document.getElementById('filtroTipo')?.value || '';
+      const filtroCliente = document.getElementById('filtroCliente')?.value.toLowerCase() || '';
+      const filtroUnidade = document.getElementById('filtroUnidade')?.value.toLowerCase() || '';
+
+      const projetosFiltrados = window.projetosPainel.filter(p => {
+        return (!filtroProjeto || p.nome.toLowerCase().includes(filtroProjeto)) &&
+               (!filtroTipo || p.tipo === filtroTipo) &&
+               (!filtroCliente || p.cliente.toLowerCase().includes(filtroCliente)) &&
+               (!filtroUnidade || p.unidade.toLowerCase().includes(filtroUnidade));
+      });
+
+      let html = '';
+      projetosFiltrados.forEach(p => {
+        html += `<div class="card" onclick="verDetalhesProjeto('${p.nome}')">`;
+        html += `<h3>${p.nome}</h3>`;
+        html += `<p><strong>Cliente:</strong> ${p.cliente}</p>`;
+        html += `<p><strong>Tipo:</strong> ${p.tipo} | <strong>Unidade:</strong> ${p.unidade}</p>`;
+        html += `<p><strong>Prep:</strong> ${p.inicioPrep} | <strong>Durante:</strong> ${p.inicioDurante}</p>`;
+        html += `<p><strong>% Conclusão:</strong> <span id="perc-${p.nome}">carregando...</span></p>`;
+        html += `</div>`;
+      });
+      document.getElementById('listaProjetos').innerHTML = html;
+
+      projetosFiltrados.forEach(async p => {
+        try {
+          const tarefas = await apiRequest('tarefas', 'GET', { projeto: p.nome });
+          const total = tarefas.length;
+          const concluidas = tarefas.filter(t => t.status === 'Concluída').length;
+          const perc = total > 0 ? Math.round((concluidas / total) * 100) : 0;
+          const span = document.getElementById(`perc-${p.nome}`);
+          if (span) span.innerText = perc + '% (' + concluidas + '/' + total + ')';
+        } catch (e) {}
+      });
+    }
+
+    async function verDetalhesProjeto(projetoNome) {
+      try {
+        const tarefas = await apiRequest('tarefas', 'GET', { projeto: projetoNome });
+        let html = `<h2>${projetoNome}</h2>`;
+        html += '<table class="tarefas"><tr><th>ID</th><th>Tarefa</th><th>Prazo</th><th>Status</th><th>Sinalizador</th><th>Anexo</th><th>Ação</th></tr>';
+        tarefas.forEach(t => {
+          html += `<tr>`;
+          html += `<td>${t.id}</td>`;
+          html += `<td>${t.tarefa}</td>`;
+          html += `<td>${t.prazo}</td>`;
+          html += `<td>${t.status}</td>`;
+          html += `<td style="color: ${t.sinalizador === 'Atrasada' ? 'red' : (t.sinalizador === 'Concluída' ? 'green' : 'black')};">${t.sinalizador}</td>`;
+          html += `<td>${t.anexo ? '<a href="' + t.anexo + '" target="_blank">📎</a>' : '—'}</td>`;
+          html += `<td><button class="btn-pequeno" onclick="editarTarefa(${t.id}, '${projetoNome}')">Editar</button></td>`;
+          html += `</tr>`;
+        });
+        html += '</table>';
+        html += '<button onclick="mudarTela(\'painel\')">Voltar</button>';
+        document.getElementById('conteudo').innerHTML = html;
+      } catch (error) {
+        alert('Erro: ' + error.message);
+      }
+    }
+
+    async function editarTarefa(id, projetoNome) {
+      try {
+        const tarefas = await apiRequest('tarefas', 'GET');
+        const tarefa = tarefas.find(t => t.id == id);
+        if (!tarefa) return;
+        let html = `<h3>Editar Tarefa #${id}</h3>`;
+        html += '<div class="form-container">';
+        html += '<form id="formEditarTarefa">';
+        html += '<label>Status:</label><select id="status">';
+        html += '<option value="Não iniciada" ' + (tarefa.status === 'Não iniciada' ? 'selected' : '') + '>Não iniciada</option>';
+        html += '<option value="Em andamento" ' + (tarefa.status === 'Em andamento' ? 'selected' : '') + '>Em andamento</option>';
+        html += '<option value="Concluída" ' + (tarefa.status === 'Concluída' ? 'selected' : '') + '>Concluída</option>';
+        html += '</select>';
+        html += '<label>Data Conclusão:</label><input type="date" id="dataConclusao" value="' + (tarefa.dataConclusao || '') + '">';
+        html += '<label>Anexo (PDF):</label><input type="file" id="anexo" accept=".pdf">';
+        if (tarefa.anexo) html += '<p>Anexo atual: <a href="' + tarefa.anexo + '" target="_blank">' + tarefa.anexo.split('/').pop() + '</a></p>';
+        html += '<button type="button" onclick="salvarEdicaoTarefa(' + id + ', \'' + projetoNome + '\')">Salvar</button>';
+        html += '<button type="button" onclick="verDetalhesProjeto(\'' + projetoNome + '\')">Cancelar</button>';
+        html += '</form></div>';
+        document.getElementById('conteudo').innerHTML = html;
+      } catch (error) {
+        alert('Erro: ' + error.message);
+      }
+    }
+
+    async function salvarEdicaoTarefa(id, projetoNome) {
+      const status = document.getElementById('status').value;
+      const dataConclusao = document.getElementById('dataConclusao').value;
+      const arquivo = document.getElementById('anexo').files[0];
+      const payload = { id, status, dataConclusao };
+      if (arquivo) {
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+          payload.anexoBase64 = e.target.result;
+          payload.nomeArquivo = arquivo.name;
+          try {
+            await apiRequest('tarefas', 'PUT', payload);
+            alert('Tarefa atualizada!');
+            verDetalhesProjeto(projetoNome);
+          } catch (error) {
+            alert('Erro: ' + error.message);
+          }
+        };
+        reader.readAsDataURL(arquivo);
+      } else {
+        try {
+          await apiRequest('tarefas', 'PUT', payload);
+          alert('Tarefa atualizada!');
+          verDetalhesProjeto(projetoNome);
+        } catch (error) {
+          alert('Erro: ' + error.message);
+        }
+      }
+    }
+
+    // ---------- CRUD PROJETOS (admin) ----------
+    async function carregarListaProjetos() {
+      try {
+        const projetos = await apiRequest('projetos', 'GET');
+        let html = '<h2>Gerenciar Projetos</h2>';
+        html += '<button onclick="mostrarFormProjeto()">+ Novo Projeto</button>';
+        html += '<table><tr><th>ID</th><th>Nome</th><th>Tipo</th><th>Cliente</th><th>Unidade</th><th>Centro Custo</th><th>Ações</th></tr>';
+        projetos.forEach(p => {
+          html += `<tr><td>${p.id}</td><td>${p.nome}</td><td>${p.tipo}</td><td>${p.cliente}</td><td>${p.unidade}</td><td>${p.centroCusto}</td>`;
+          html += `<td><button class="btn-pequeno" onclick="editarProjeto(${p.id})">Editar</button> <button class="btn-pequeno" onclick="excluirProjeto(${p.id})">Excluir</button></td></tr>`;
+        });
+        html += '</table><div id="formProjetoContainer"></div>';
+        document.getElementById('conteudo').innerHTML = html;
+      } catch (error) {
+        alert('Erro: ' + error.message);
+      }
+    }
+
+    function mostrarFormProjeto(projeto) {
+      projeto = projeto || { id: null, nome: '', tipo: 'PG', cliente: '', unidade: '', centroCusto: '', inicioPrep: '', inicioDurante: '', fimDurante: '', fimDesmob: '' };
+      let html = '<h3>' + (projeto.id ? 'Editar Projeto' : 'Novo Projeto') + '</h3>';
+      html += '<div class="form-container"><form id="formProjeto">';
+      html += '<label>Nome:</label><input type="text" id="projNome" value="' + projeto.nome + '">';
+      html += '<label>Tipo:</label><select id="projTipo"><option value="PG" ' + (projeto.tipo==='PG'?'selected':'') + '>PG</option><option value="Rotina" ' + (projeto.tipo==='Rotina'?'selected':'') + '>Rotina</option><option value="Projeto" ' + (projeto.tipo==='Projeto'?'selected':'') + '>Projeto</option></select>';
+      html += '<label>Cliente:</label><input type="text" id="projCliente" value="' + projeto.cliente + '">';
+      html += '<label>Unidade:</label><input type="text" id="projUnidade" value="' + projeto.unidade + '">';
+      html += '<label>Centro de Custo:</label><input type="number" id="projCentro" value="' + projeto.centroCusto + '">';
+      html += '<label>Início Preparativo:</label><input type="date" id="projInicioPrep" value="' + projeto.inicioPrep + '">';
+      html += '<label>Início Durante:</label><input type="date" id="projInicioDurante" value="' + projeto.inicioDurante + '">';
+      html += '<label>Fim Durante:</label><input type="date" id="projFimDurante" value="' + projeto.fimDurante + '">';
+      html += '<label>Fim Desmobilização:</label><input type="date" id="projFimDesmob" value="' + projeto.fimDesmob + '">';
+      html += '<button type="button" onclick="salvarProjeto(' + projeto.id + ')">Salvar</button>';
+      html += '<button type="button" onclick="carregarListaProjetos()">Cancelar</button>';
+      html += '</form></div>';
+      document.getElementById('formProjetoContainer').innerHTML = html;
+    }
+
+    async function editarProjeto(id) {
+      const projetos = await apiRequest('projetos', 'GET');
+      const proj = projetos.find(p => p.id == id);
+      if (proj) mostrarFormProjeto(proj);
+    }
+
+    async function salvarProjeto(id) {
+      const projeto = {
+        id: id,
+        nome: document.getElementById('projNome').value,
+        tipo: document.getElementById('projTipo').value,
+        cliente: document.getElementById('projCliente').value,
+        unidade: document.getElementById('projUnidade').value,
+        centroCusto: document.getElementById('projCentro').value,
+        inicioPrep: document.getElementById('projInicioPrep').value,
+        inicioDurante: document.getElementById('projInicioDurante').value,
+        fimDurante: document.getElementById('projFimDurante').value,
+        fimDesmob: document.getElementById('projFimDesmob').value
+      };
+      await apiRequest('projetos', 'POST', projeto);
+      alert('Projeto salvo!');
+      carregarListaProjetos();
+    }
+
+    async function excluirProjeto(id) {
+      if (!confirm('Excluir projeto?')) return;
+      await apiRequest('projetos', 'DELETE', { id });
+      alert('Projeto excluído');
+      carregarListaProjetos();
+    }
+
+    // ---------- CRUD TAREFAS (admin) ----------
+    async function carregarListaTarefas() {
+      try {
+        const tarefas = await apiRequest('tarefas', 'GET');
+        let html = '<h2>Gerenciar Tarefas</h2>';
+        html += '<button onclick="mostrarFormTarefa()">+ Nova Tarefa</button>';
+        html += '<table><tr><th>ID</th><th>Tarefa</th><th>Projeto</th><th>Prazo</th><th>Status</th><th>Anexo Obrig.</th><th>Ações</th></tr>';
+        tarefas.forEach(t => {
+          html += `<tr><td>${t.id}</td><td>${t.tarefa}</td><td>${t.projeto}</td><td>${t.prazo}</td><td>${t.status}</td><td>${t.anexoObrigatorio}</td>`;
+          html += `<td><button class="btn-pequeno" onclick="editarTarefaAdmin(${t.id})">Editar</button> <button class="btn-pequeno" onclick="excluirTarefa(${t.id})">Excluir</button></td></tr>`;
+        });
+        html += '</table><div id="formTarefaContainer"></div>';
+        document.getElementById('conteudo').innerHTML = html;
+      } catch (error) {
+        alert('Erro: ' + error.message);
+      }
+    }
+
+    async function mostrarFormTarefa(tarefa) {
+      tarefa = tarefa || { id: null, tarefa: '', projeto: '', centroCusto: '', prazo: '', status: 'Não iniciada', anexoObrigatorio: 'Não' };
+      const projetos = await apiRequest('nomes-projetos', 'GET');
+      let html = '<h3>' + (tarefa.id ? 'Editar Tarefa' : 'Nova Tarefa') + '</h3>';
+      html += '<div class="form-container"><form id="formTarefa">';
+      html += '<label>Tarefa:</label><input type="text" id="tarDesc" value="' + tarefa.tarefa + '">';
+      html += '<label>Projeto:</label><select id="tarProjeto">';
+      projetos.forEach(p => {
+        html += '<option value="' + p + '" ' + (tarefa.projeto === p ? 'selected' : '') + '>' + p + '</option>';
+      });
+      html += '</select>';
+      html += '<label>Centro de Custo:</label><input type="number" id="tarCentro" value="' + tarefa.centroCusto + '">';
+      html += '<label>Prazo:</label><input type="date" id="tarPrazo" value="' + tarefa.prazo + '">';
+      html += '<label>Status:</label><select id="tarStatus">';
+      html += '<option value="Não iniciada" ' + (tarefa.status === 'Não iniciada' ? 'selected' : '') + '>Não iniciada</option>';
+      html += '<option value="Em andamento" ' + (tarefa.status === 'Em andamento' ? 'selected' : '') + '>Em andamento</option>';
+      html += '<option value="Concluída" ' + (tarefa.status === 'Concluída' ? 'selected' : '') + '>Concluída</option>';
+      html += '</select>';
+      html += '<label>Anexo obrigatório?</label><select id="tarAnexoObrig">';
+      html += '<option value="Não" ' + (tarefa.anexoObrigatorio === 'Não' ? 'selected' : '') + '>Não</option>';
+      html += '<option value="Sim" ' + (tarefa.anexoObrigatorio === 'Sim' ? 'selected' : '') + '>Sim</option>';
+      html += '</select>';
+      html += '<button type="button" onclick="salvarTarefaAdmin(' + tarefa.id + ')">Salvar</button>';
+      html += '<button type="button" onclick="carregarListaTarefas()">Cancelar</button>';
+      html += '</form></div>';
+      document.getElementById('formTarefaContainer').innerHTML = html;
+    }
+
+    async function editarTarefaAdmin(id) {
+      const tarefas = await apiRequest('tarefas', 'GET');
+      const t = tarefas.find(t => t.id == id);
+      if (t) mostrarFormTarefa(t);
+    }
+
+    async function salvarTarefaAdmin(id) {
+      const tarefa = {
+        id: id,
+        tarefa: document.getElementById('tarDesc').value,
+        projeto: document.getElementById('tarProjeto').value,
+        centroCusto: document.getElementById('tarCentro').value,
+        prazo: document.getElementById('tarPrazo').value,
+        status: document.getElementById('tarStatus').value,
+        anexoObrigatorio: document.getElementById('tarAnexoObrig').value
+      };
+      await apiRequest('tarefas', 'POST', tarefa);
+      alert('Tarefa salva!');
+      carregarListaTarefas();
+    }
+
+    async function excluirTarefa(id) {
+      if (!confirm('Excluir tarefa?')) return;
+      await apiRequest('tarefas', 'DELETE', { id });
+      alert('Tarefa excluída');
+      carregarListaTarefas();
+    }
+
+    // ---------- CRUD USUÁRIOS (admin) ----------
+    async function carregarListaUsuarios() {
+      try {
+        const usuarios = await apiRequest('usuarios', 'GET');
+        let html = '<h2>Gerenciar Usuários</h2>';
+        html += '<button onclick="mostrarFormUsuario()">+ Novo Usuário</button>';
+        html += '<table><tr><th>Nome</th><th>Login</th><th>Nível</th><th>Ações</th></tr>';
+        usuarios.forEach(u => {
+          html += `<tr><td>${u.nome}</td><td>${u.login}</td><td>${u.nivel}</td>`;
+          html += `<td><button class="btn-pequeno" onclick="editarUsuario('${u.login}')">Editar</button> <button class="btn-pequeno" onclick="excluirUsuario('${u.login}')">Excluir</button></td></tr>`;
+        });
+        html += '</table><div id="formUsuarioContainer"></div>';
+        document.getElementById('conteudo').innerHTML = html;
+      } catch (error) {
+        alert('Erro: ' + error.message);
+      }
+    }
+
+    function mostrarFormUsuario(usuario) {
+      usuario = usuario || { nome: '', login: '', nivel: 'Usuario', senha: '' };
+      let html = '<h3>' + (usuario.login ? 'Editar Usuário' : 'Novo Usuário') + '</h3>';
+      html += '<div class="form-container"><form id="formUsuario">';
+      html += '<label>Nome:</label><input type="text" id="usrNome" value="' + usuario.nome + '">';
+      html += '<label>Login:</label><input type="text" id="usrLogin" value="' + usuario.login + '" ' + (usuario.login ? 'readonly' : '') + '>';
+      html += '<label>Senha:</label><input type="password" id="usrSenha" placeholder="' + (usuario.login ? 'Deixe em branco para manter' : '') + '">';
+      html += '<label>Nível:</label><select id="usrNivel">';
+      html += '<option value="Usuario" ' + (usuario.nivel === 'Usuario' ? 'selected' : '') + '>Usuário</option>';
+      html += '<option value="Administrador" ' + (usuario.nivel === 'Administrador' ? 'selected' : '') + '>Administrador</option>';
+      html += '</select>';
+      html += '<button type="button" onclick="salvarUsuario(\'' + usuario.login + '\')">Salvar</button>';
+      html += '<button type="button" onclick="carregarListaUsuarios()">Cancelar</button>';
+      html += '</form></div>';
+      document.getElementById('formUsuarioContainer').innerHTML = html;
+    }
+
+    async function editarUsuario(login) {
+      const usuarios = await apiRequest('usuarios', 'GET');
+      const u = usuarios.find(u => u.login === login);
+      if (u) mostrarFormUsuario(u);
+    }
+
+    async function salvarUsuario(loginAntigo) {
+      const usuarioData = {
+        nome: document.getElementById('usrNome').value,
+        login: document.getElementById('usrLogin').value,
+        senha: document.getElementById('usrSenha').value,
+        nivel: document.getElementById('usrNivel').value
+      };
+      await apiRequest('usuarios', 'POST', usuarioData);
+      alert('Usuário salvo!');
+      carregarListaUsuarios();
+    }
+
+    async function excluirUsuario(login) {
+      if (!confirm('Excluir usuário?')) return;
+      await apiRequest('usuarios', 'DELETE', { login });
+      alert('Usuário excluído');
+      carregarListaUsuarios();
+    }
+
+    // ---------- ACESSOS (admin) ----------
+    async function carregarListaAcessos() {
+      try {
+        const [usuarios, projetos, acessos] = await Promise.all([
+          apiRequest('usuarios', 'GET'),
+          apiRequest('projetos', 'GET'),
+          apiRequest('acessos', 'GET')
+        ]);
+        const acessoMap = {};
+        acessos.forEach(a => { if (!acessoMap[a.login]) acessoMap[a.login] = []; acessoMap[a.login].push(a.projeto); });
+        let html = '<h2>Gerenciar Acessos</h2><table><tr><th>Usuário</th><th>Projetos Permitidos</th><th>Ações</th></tr>';
+        usuarios.forEach(u => {
+          if (u.nivel === 'Administrador') return;
+          const projetosUser = acessoMap[u.login] || [];
+          html += `<tr><td>${u.nome} (${u.login})</td><td>${projetosUser.join(', ') || 'Nenhum'}</td>`;
+          html += `<td><button class="btn-pequeno" onclick="editarAcessos('${u.login}')">Editar</button></td></tr>`;
+        });
+        html += '</table><div id="formAcessosContainer"></div>';
+        document.getElementById('conteudo').innerHTML = html;
+      } catch (error) {
+        alert('Erro: ' + error.message);
+      }
+    }
+
+    async function editarAcessos(login) {
+      const [projetos, acessos] = await Promise.all([
+        apiRequest('projetos', 'GET'),
+        apiRequest('acessos', 'GET')
+      ]);
+      const acessosDoUsuario = acessos.filter(a => a.login === login).map(a => a.projeto);
+      let html = `<h3>Permissões para ${login}</h3><div class="form-container"><div class="checkbox-group" id="checkProjetos">`;
+      projetos.forEach(p => {
+        const checked = acessosDoUsuario.includes(p.nome) ? 'checked' : '';
+        html += `<label class="checkbox-item"><input type="checkbox" value="${p.nome}" ${checked}> ${p.nome}</label>`;
+      });
+      html += `</div><button onclick="salvarAcessos('${login}')">Salvar</button>`;
+      html += `<button onclick="carregarListaAcessos()">Cancelar</button></div>`;
+      document.getElementById('formAcessosContainer').innerHTML = html;
+    }
+
+    async function salvarAcessos(login) {
+      const checkboxes = document.querySelectorAll('#checkProjetos input[type=checkbox]:checked');
+      const projetos = Array.from(checkboxes).map(cb => cb.value);
+      await apiRequest('acessos', 'POST', { login, projetos });
+      alert('Acessos atualizados!');
+      carregarListaAcessos();
+    }
+  </script>
+</body>
+</html>
