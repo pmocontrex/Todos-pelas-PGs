@@ -1,8 +1,9 @@
 """
 app.py — Projex no Streamlit Cloud
-Sem proxy intermediário: o browser chama o Google Apps Script diretamente.
-O GAS publicado como "Anyone" já responde com CORS aberto.
-A única mudança no HTML é a API_BASE_URL apontar para o GAS.
+Chama o Google Apps Script diretamente (sem proxy).
+Corrige o 'Invalid base URL' que ocorre dentro do iframe sandboxed do Streamlit:
+  - API_BASE_URL vira a URL absoluta do GAS
+  - new URL(base, origin) é substituído por new URL(base) — funciona com URL absoluta
 """
 
 import streamlit as st
@@ -29,9 +30,18 @@ st.markdown(
 with open("index.html", "r", encoding="utf-8") as f:
     html_content = f.read()
 
+# Fix 1: aponta API_BASE_URL para o GAS diretamente
 html_patched = html_content.replace(
     "const API_BASE_URL = '/api/proxy';",
     f"const API_BASE_URL = '{GAS_URL}';",
+)
+
+# Fix 2: dentro do iframe do Streamlit, window.location.origin é "null"
+# então new URL(base, "null") lança "Invalid base URL".
+# Como API_BASE_URL agora é absoluta, basta usar new URL(base) sem o segundo argumento.
+html_patched = html_patched.replace(
+    "const url = new URL(API_BASE_URL, window.location.origin);",
+    "const url = new URL(API_BASE_URL);",
 )
 
 html_final = f"""<!DOCTYPE html>
