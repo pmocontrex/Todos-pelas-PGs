@@ -1211,9 +1211,19 @@ def tela_dashboard():
                 except: pass
 
         hoje_str = date.today().isoformat()
-        fig.add_vline(x=hoje_str, line_color="#e74c3c", line_width=2.5,
-                      annotation_text="Hoje", annotation_font_color="#e74c3c",
-                      annotation_font_size=11)
+        # add_vline com eixo de data quebra em versões novas do Plotly — usa shape diretamente
+        fig.add_shape(
+            type="line", xref="x", yref="paper",
+            x0=hoje_str, x1=hoje_str, y0=0, y1=1,
+            line=dict(color="#e74c3c", width=2.5, dash="dot"),
+        )
+        fig.add_annotation(
+            xref="x", yref="paper",
+            x=hoje_str, y=1.02,
+            text="<b>Hoje</b>", showarrow=False,
+            font=dict(color="#e74c3c", size=11),
+            xanchor="center",
+        )
 
         fig.update_layout(
             barmode="overlay",
