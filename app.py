@@ -1185,54 +1185,84 @@ def tela_dashboard():
         fig = go.Figure()
         cores = {"Preparativo":("#2657A0","#4A7FC0"),"Durante":("#166A45","#1E8A5A"),"Desmob.":("#B06010","#E8A020")}
 
+        # Monta barras usando datas absolutas em milliseconds (epoch) — compatível com xaxis type=date
         for p in com_data:
             nm = p["nome"]
             fases = []
             if p.get("inicioPrep") and p.get("inicioDurante"):
-                fases.append(("Preparativo", p["inicioPrep"], p["inicioDurante"]))
+                fases.append(("Preparativo", p["inicioPrep"], p["inicioDurante"], "#2657A0"))
             if p.get("inicioDurante") and p.get("fimDurante"):
-                fases.append(("Durante", p["inicioDurante"], p["fimDurante"]))
+                fases.append(("Durante", p["inicioDurante"], p["fimDurante"], "#1E8A5A"))
             if p.get("fimDurante") and p.get("fimDesmob"):
-                fases.append(("Desmob.", p["fimDurante"], p["fimDesmob"]))
+                fases.append(("Desmob.", p["fimDurante"], p["fimDesmob"], "#E8A020"))
 
-            for fase, ini, fim in fases:
+            for fase, ini, fim, cor in fases:
                 try:
-                    d_ini = datetime.strptime(ini,"%Y-%m-%d")
-                    d_fim = datetime.strptime(fim,"%Y-%m-%d")
-                    dias  = (d_fim - d_ini).days
-                    c1,c2 = cores.get(fase,("#888","#aaa"))
+                    d_ini = datetime.strptime(ini, "%Y-%m-%d")
+                    d_fim = datetime.strptime(fim, "%Y-%m-%d")
+                    # Converte para ms epoch — única forma confiável com barmode+date axis
+                    ms_ini = int(d_ini.timestamp() * 1000)
+                    ms_fim = int(d_fim.timestamp() * 1000)
+                    dur_ms = ms_fim - ms_ini
+                    if dur_ms <= 0:
+                        continue
                     fig.add_trace(go.Bar(
-                        name=fase, y=[nm], x=[dias], base=[ini],
+                        name=fase,
+                        y=[nm],
+                        x=[dur_ms],
+                        base=[ms_ini],
                         orientation="h",
-                        marker=dict(color=c1, line=dict(width=0)),
-                        hovertemplate=f"<b>{nm}</b><br>{fase}: {iso_br(ini)} → {iso_br(fim)}<extra></extra>",
+                        marker=dict(color=cor, line=dict(width=0)),
+                        hovertemplate=(
+                            f"<b>{nm}</b><br>{fase}<br>"
+                            f"{iso_br(ini)} → {iso_br(fim)}<extra></extra>"
+                        ),
                         showlegend=False,
                     ))
-                except: pass
+                except Exception:
+                    pass
 
-        hoje_str = date.today().isoformat()
-        # add_vline com eixo de data quebra em versões novas do Plotly — usa shape diretamente
+        # Linha de hoje em ms epoch
+        hoje_dt  = datetime.combine(date.today(), datetime.min.time())
+        hoje_ms  = int(hoje_dt.timestamp() * 1000)
         fig.add_shape(
             type="line", xref="x", yref="paper",
-            x0=hoje_str, x1=hoje_str, y0=0, y1=1,
-            line=dict(color="#e74c3c", width=2.5, dash="dot"),
+            x0=hoje_ms, x1=hoje_ms, y0=0, y1=1,
+            line=dict(color="#e74c3c", width=2, dash="dot"),
         )
         fig.add_annotation(
             xref="x", yref="paper",
-            x=hoje_str, y=1.02,
+            x=hoje_ms, y=1.04,
             text="<b>Hoje</b>", showarrow=False,
             font=dict(color="#e74c3c", size=11),
             xanchor="center",
         )
 
+        # Legenda manual com traces invisíveis
+        for lbl, cor in [("Preparativo","#2657A0"),("Durante","#1E8A5A"),("Desmob.","#E8A020")]:
+            fig.add_trace(go.Bar(
+                name=lbl, x=[None], y=[None], orientation="h",
+                marker=dict(color=cor), showlegend=True,
+            ))
+
         fig.update_layout(
             barmode="overlay",
-            xaxis=dict(type="date", title="", gridcolor="#EFF2F8",
-                       tickformat="%b %Y", tickfont=dict(size=11)),
-            yaxis=dict(title="", autorange="reversed", tickfont=dict(size=12,color="#1B3A5C"),
-                       gridcolor="#EFF2F8"),
-            height=max(280, len(com_data)*46+80),
-            margin=dict(l=0,r=0,t=10,b=20),
+            xaxis=dict(
+                type="date", title="", gridcolor="#EFF2F8",
+                tickformat="%b %Y", tickfont=dict(size=11),
+            ),
+            yaxis=dict(
+                title="", autorange="reversed",
+                tickfont=dict(size=12, color="#1B3A5C"),
+                gridcolor="#EFF2F8",
+            ),
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.06,
+                xanchor="left", x=0,
+                font=dict(size=12), bgcolor="rgba(0,0,0,0)",
+            ),
+            height=max(300, len(com_data)*50+100),
+            margin=dict(l=0, r=10, t=40, b=20),
             plot_bgcolor="white", paper_bgcolor="white",
             font=dict(family="DM Sans, sans-serif"),
         )
